@@ -1,0 +1,27 @@
+NSE - Neck Switch Engage
+Version: 1.0.0
+Copyright (C) 2026
+
+---------------------------------------------------------------
+OFFICIAL BEHAVIOR
+---------------------------------------------------------------
+ENGAGE  = DisplaySwitch.exe /internal
+RESTORE = DisplaySwitch.exe /extend
+
+---------------------------------------------------------------
+DISTRIBUTION
+---------------------------------------------------------------
+This is a portable single-file executable.
+No installer required. No admin rights required.
+No network access. No telemetry. No background service.
+
+WARNING: Only download NSE.exe from the official release
+location. Verify the SHA-256 hash before running any copy
+obtained from a third party.
+
+---------------------------------------------------------------
+SHA-256 CHECKSUM
+---------------------------------------------------------------
+875bcc2c92fef2e8458835ded5ff55d48e367e3df057bd6ab578314ea6cfede0
+
+File: dist\NSE.exe
