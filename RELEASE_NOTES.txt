@@ -5,8 +5,16 @@ Copyright (C) 2026
 ---------------------------------------------------------------
 OFFICIAL BEHAVIOR
 ---------------------------------------------------------------
-ENGAGE  = DisplaySwitch.exe /internal
+ENGAGE  = Keep only the Windows primary monitor active
+          (via the CCD API: QueryDisplayConfig / SetDisplayConfig).
+          GPU-, driver-, and port-independent.
 RESTORE = DisplaySwitch.exe /extend
+
+Note: earlier builds used DisplaySwitch.exe /internal for ENGAGE.
+That kept whichever display Windows enumerated first, which depended
+on the GPU and cabling. ENGAGE now targets the primary monitor by
+identity (desktop position 0,0) so the correct monitor survives a
+GPU change.
 
 ---------------------------------------------------------------
 DISTRIBUTION
@@ -22,6 +30,9 @@ obtained from a third party.
 ---------------------------------------------------------------
 SHA-256 CHECKSUM
 ---------------------------------------------------------------
-875bcc2c92fef2e8458835ded5ff55d48e367e3df057bd6ab578314ea6cfede0
+REGENERATE ON NEXT BUILD -- the primary-monitor change requires a
+fresh Windows build of NSE.exe. The previous hash
+(875bcc2c92fef2e8458835ded5ff55d48e367e3df057bd6ab578314ea6cfede0)
+no longer matches the current source.
 
 File: dist\NSE.exe

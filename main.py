@@ -5,6 +5,8 @@ import customtkinter as ctk
 from tkinter import messagebox
 from PIL import Image
 
+import display_config
+
 # ── Resource helper (dev + PyInstaller onefile) ───────────────────────────────
 def _res(relative: str) -> str:
     base = getattr(sys, "_MEIPASS", os.path.dirname(os.path.abspath(__file__)))
@@ -168,9 +170,20 @@ class NSEApp(ctk.CTk):
         return False
 
     def _engage(self):
-        if self._run("/internal"):
+        try:
+            ok, err = display_config.engage_primary_only()
+        except Exception as exc:  # ctypes/API surprises shouldn't crash the UI
+            ok, err = False, str(exc)
+
+        if ok:
             self._status_var.set("NSE engaged")
             self._status_label.configure(text_color=ACCENT)
+        else:
+            messagebox.showerror(
+                "NSE — Error",
+                "Could not switch to the primary monitor.\n\n"
+                f"{err}",
+            )
 
     def _restore(self):
         if self._run("/extend"):
