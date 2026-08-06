@@ -8,8 +8,20 @@ from tkinter import messagebox
 from PIL import Image
 
 # ── Secondary GPU to power down while gaming ──────────────────────────────────
-# Matched against Get-PnpDevice FriendlyName (case-insensitive substring).
-SECONDARY_GPU_MATCH = "1050"
+# The GTX 1050 that drives the extra work monitors. Matched by PnP InstanceId,
+# which is unique and stable across driver updates; the FriendlyName substring
+# is only a fallback in case the card is moved to a different PCIe slot (the
+# trailing 4&...&0&0009 encodes bus location and would change if it were).
+SECONDARY_GPU_INSTANCE_ID = (
+    r"PCI\VEN_10DE&DEV_1C81&SUBSYS_8C971462&REV_A1\4&288DAC85&0&0009"
+)
+SECONDARY_GPU_MATCH = "GTX 1050"
+
+# The GTX 1080 that drives the primary gaming display. Never disabled; used to
+# sanity-check that we are not about to shut off the card we game on.
+PRIMARY_GPU_INSTANCE_ID = (
+    r"PCI\VEN_10DE&DEV_1B80&SUBSYS_33621462&REV_A1\4&1F822D9D&0&0008"
+)
 
 # Milliseconds to wait after re-enabling the GPU before touching display
 # topology, so the driver has time to finish reinitializing.
@@ -55,13 +67,23 @@ def _powershell(cmd: str) -> subprocess.CompletedProcess:
 
 
 def _set_secondary_gpu_enabled(enabled: bool) -> bool:
-    """Enable or disable the PnP display adapter matching SECONDARY_GPU_MATCH.
-    Returns True if a matching device was found and the command succeeded."""
+    """Enable or disable the secondary GPU.
+
+    Resolves the card by PnP InstanceId first, falling back to a FriendlyName
+    match. Refuses to act if the resolved device is the primary GPU, so a bad
+    identifier can never blank the display we game on."""
     verb = "Enable-PnpDevice" if enabled else "Disable-PnpDevice"
     cmd = (
-        f"$d = Get-PnpDevice -Class Display -PresentOnly | "
-        f"Where-Object {{ $_.FriendlyName -like '*{SECONDARY_GPU_MATCH}*' }}; "
-        f"if ($d) {{ $d | {verb} -Confirm:$false; exit 0 }} else {{ exit 1 }}"
+        f"$id = '{SECONDARY_GPU_INSTANCE_ID}'; "
+        f"$d = Get-PnpDevice -InstanceId $id -ErrorAction SilentlyContinue; "
+        f"if (-not $d) {{ "
+        f"$d = Get-PnpDevice -Class Display | "
+        f"Where-Object {{ $_.FriendlyName -like '*{SECONDARY_GPU_MATCH}*' }} "
+        f"}}; "
+        f"if (-not $d) {{ exit 2 }}; "
+        f"if ($d.InstanceId -eq '{PRIMARY_GPU_INSTANCE_ID}') {{ exit 3 }}; "
+        f"$d | {verb} -Confirm:$false -ErrorAction Stop; "
+        f"exit 0"
     )
     result = _powershell(cmd)
     return result.returncode == 0
@@ -414,9 +436,10 @@ class NSEApp(ctk.CTk):
         if not _set_secondary_gpu_enabled(False):
             messagebox.showwarning(
                 "NSE — Warning",
-                f"Could not find/disable a GPU matching "
-                f"'{SECONDARY_GPU_MATCH}'. Make sure NSE is running as "
-                f"Administrator. Continuing with display switch only.",
+                f"Could not disable the {SECONDARY_GPU_MATCH}. Make sure NSE "
+                f"is running as Administrator.\n\n"
+                f"Continuing with display switch only — the card is still "
+                f"active, so expect the usual cross-GPU overhead.",
             )
 
         if self._run("/internal"):

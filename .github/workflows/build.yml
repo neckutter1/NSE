@@ -1,0 +1,44 @@
+name: Build NSE.exe
+
+on:
+  push:
+    branches: ["**"]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Build executable
+        run: >
+          pyinstaller --noconfirm --onefile --windowed --uac-admin
+          --name NSE
+          --collect-all customtkinter
+          --add-data "art;art"
+          --icon "art\NSE.ico"
+          main.py
+
+      - name: Compute SHA-256
+        id: hash
+        shell: pwsh
+        run: |
+          $h = (Get-FileHash dist\NSE.exe -Algorithm SHA256).Hash
+          Write-Host "SHA-256: $h"
+          "sha256=$h" >> $env:GITHUB_OUTPUT
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: NSE-exe
+          path: dist/NSE.exe
+          if-no-files-found: error
