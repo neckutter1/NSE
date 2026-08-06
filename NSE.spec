@@ -1,7 +1,7 @@
 # -*- mode: python ; coding: utf-8 -*-
 from PyInstaller.utils.hooks import collect_all
 
-datas = [('art', 'art')]
+datas = [('art', 'art'), ('tools', 'tools')]
 binaries = []
 hiddenimports = []
 tmp_ret = collect_all('customtkinter')
@@ -43,4 +43,5 @@ exe = EXE(
     codesign_identity=None,
     entitlements_file=None,
     icon=['art\\NSE.ico'],
+    uac_admin=True,
 )

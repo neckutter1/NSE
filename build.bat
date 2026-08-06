@@ -18,9 +18,11 @@ if exist "art\NSE.ico" (
         --noconfirm ^
         --onefile ^
         --windowed ^
+        --uac-admin ^
         --name NSE ^
         --collect-all customtkinter ^
         --add-data "art;art" ^
+        --add-data "tools;tools" ^
         --icon "art\NSE.ico" ^
         main.py
 ) else (
@@ -29,8 +31,10 @@ if exist "art\NSE.ico" (
         --noconfirm ^
         --onefile ^
         --windowed ^
+        --uac-admin ^
         --name NSE ^
         --collect-all customtkinter ^
+        --add-data "tools;tools" ^
         main.py
 )
 
@@ -64,15 +68,19 @@ echo [NSE] Writing RELEASE_NOTES.txt...
     echo ---------------------------------------------------------------
     echo OFFICIAL BEHAVIOR
     echo ---------------------------------------------------------------
-    echo ENGAGE  = DisplaySwitch.exe /internal
-    echo RESTORE = DisplaySwitch.exe /extend
+    echo ENGAGE  = Disable secondary GPU ^(PnP device^) + DisplaySwitch /internal
+    echo RESTORE = Enable secondary GPU + DisplaySwitch /extend + reload
+    echo           saved monitor layout ^(if tools\MultiMonitorTool.exe present^)
     echo.
     echo ---------------------------------------------------------------
     echo DISTRIBUTION
     echo ---------------------------------------------------------------
     echo This is a portable single-file executable.
-    echo No installer required. No admin rights required.
-    echo No network access. No telemetry. No background service.
+    echo No installer required. Requires Administrator rights ^(prompts
+    echo via UAC^) because disabling/enabling a GPU device requires
+    echo elevation. No network access. No telemetry. No background service.
+    echo Optional: tools\MultiMonitorTool.exe ^(NirSoft, not bundled - see
+    echo tools\README.txt^) enables automatic monitor layout restore.
     echo.
     echo WARNING: Only download NSE.exe from the official release
     echo location. Verify the SHA-256 hash before running any copy
