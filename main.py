@@ -23,6 +23,17 @@ PRIMARY_GPU_INSTANCE_ID = (
     r"PCI\VEN_10DE&DEV_1B80&SUBSYS_33621462&REV_A1\4&1F822D9D&0&0008"
 )
 
+# Display topology this was built against (monitor parent bus -> adapter):
+#   GTX 1080 (5&15B7F9E0&0)  DISPLAY1  ASUS VG32VQM5B  1920x1080  PRIMARY
+#                            DISPLAY2  DELL P2217      1050x1680  (rotated)
+#                            DISPLAY3  Dell P2217H     1920x1080
+#                            DISPLAY4  Dell P2217H     1920x1080
+#   GTX 1050 (5&148360F3&0)  DISPLAY5  generic         1024x768
+#                            DISPLAY6  generic         1024x1280
+#                            DISPLAY7  generic         1920x1080
+# The primary display sits on the 1080, so disabling the 1050 never takes out
+# the display that DisplaySwitch /internal falls back to.
+
 # Milliseconds to wait after re-enabling the GPU before touching display
 # topology, so the driver has time to finish reinitializing.
 GPU_REINIT_DELAY_MS = 3000
