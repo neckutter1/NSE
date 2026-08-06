@@ -1,5 +1,6 @@
 import os
 import sys
+import json
 import ctypes
 import subprocess
 import customtkinter as ctk
@@ -66,15 +67,163 @@ def _set_secondary_gpu_enabled(enabled: bool) -> bool:
     return result.returncode == 0
 
 
-# ── Monitor layout save/restore (NirSoft MultiMonitorTool, user-supplied) ──
-def _mmt_path() -> str:
-    return _res(os.path.join("tools", "MultiMonitorTool.exe"))
+# ── Monitor layout save/restore (native Win32 multi-monitor API) ───────────
+# Uses EnumDisplayDevices / EnumDisplaySettingsEx / ChangeDisplaySettingsEx
+# directly (the same API Windows itself uses) so no third-party tool is
+# needed to capture and reapply monitor position/resolution/orientation.
+DISPLAY_DEVICE_ATTACHED_TO_DESKTOP = 0x00000001
+ENUM_CURRENT_SETTINGS = -1
+
+DM_POSITION           = 0x00000020
+DM_BITSPERPEL         = 0x00040000
+DM_PELSWIDTH          = 0x00080000
+DM_PELSHEIGHT         = 0x00100000
+DM_DISPLAYFREQUENCY   = 0x00400000
+DM_DISPLAYORIENTATION = 0x00000080
+
+CDS_UPDATEREGISTRY = 0x00000001
+CDS_NORESET        = 0x10000000
+
+
+class _DISPLAY_DEVICE(ctypes.Structure):
+    _fields_ = [
+        ("cb", ctypes.c_uint32),
+        ("DeviceName", ctypes.c_wchar * 32),
+        ("DeviceString", ctypes.c_wchar * 128),
+        ("StateFlags", ctypes.c_uint32),
+        ("DeviceID", ctypes.c_wchar * 128),
+        ("DeviceKey", ctypes.c_wchar * 128),
+    ]
+
+
+class _DEVMODE(ctypes.Structure):
+    _fields_ = [
+        ("dmDeviceName", ctypes.c_wchar * 32),
+        ("dmSpecVersion", ctypes.c_uint16),
+        ("dmDriverVersion", ctypes.c_uint16),
+        ("dmSize", ctypes.c_uint16),
+        ("dmDriverExtra", ctypes.c_uint16),
+        ("dmFields", ctypes.c_uint32),
+        ("dmPositionX", ctypes.c_int32),
+        ("dmPositionY", ctypes.c_int32),
+        ("dmDisplayOrientation", ctypes.c_uint32),
+        ("dmDisplayFixedOutput", ctypes.c_uint32),
+        ("dmColor", ctypes.c_short),
+        ("dmDuplex", ctypes.c_short),
+        ("dmYResolution", ctypes.c_short),
+        ("dmTTOption", ctypes.c_short),
+        ("dmCollate", ctypes.c_short),
+        ("dmFormName", ctypes.c_wchar * 32),
+        ("dmLogPixels", ctypes.c_uint16),
+        ("dmBitsPerPel", ctypes.c_uint32),
+        ("dmPelsWidth", ctypes.c_uint32),
+        ("dmPelsHeight", ctypes.c_uint32),
+        ("dmDisplayFlags", ctypes.c_uint32),
+        ("dmDisplayFrequency", ctypes.c_uint32),
+        ("dmICMMethod", ctypes.c_uint32),
+        ("dmICMIntent", ctypes.c_uint32),
+        ("dmMediaType", ctypes.c_uint32),
+        ("dmDitherType", ctypes.c_uint32),
+        ("dmReserved1", ctypes.c_uint32),
+        ("dmReserved2", ctypes.c_uint32),
+        ("dmPanningWidth", ctypes.c_uint32),
+        ("dmPanningHeight", ctypes.c_uint32),
+    ]
 
 
 def _layout_path() -> str:
     base = os.path.join(os.environ.get("LOCALAPPDATA", os.path.expanduser("~")), "NSE")
     os.makedirs(base, exist_ok=True)
-    return os.path.join(base, "layout.cfg")
+    return os.path.join(base, "layout.json")
+
+
+def _enum_active_monitors():
+    """Yield (adapter_device_name, stable_monitor_id) for every monitor
+    currently attached to the desktop. stable_monitor_id is the monitor's
+    own PnP DeviceID (EDID-based) when available, so a saved layout still
+    matches up correctly even if \\\\.\\DISPLAYn numbering shifts after the
+    secondary GPU is disabled/enabled."""
+    user32 = ctypes.windll.user32
+    i = 0
+    while True:
+        dd = _DISPLAY_DEVICE()
+        dd.cb = ctypes.sizeof(_DISPLAY_DEVICE)
+        if not user32.EnumDisplayDevicesW(None, i, ctypes.byref(dd), 0):
+            break
+        i += 1
+        if not (dd.StateFlags & DISPLAY_DEVICE_ATTACHED_TO_DESKTOP):
+            continue
+
+        monitor_id = dd.DeviceName
+        mon = _DISPLAY_DEVICE()
+        mon.cb = ctypes.sizeof(_DISPLAY_DEVICE)
+        if user32.EnumDisplayDevicesW(dd.DeviceName, 0, ctypes.byref(mon), 0) and mon.DeviceID:
+            monitor_id = mon.DeviceID
+
+        yield dd.DeviceName, monitor_id
+
+
+def _monitor_count() -> int:
+    return sum(1 for _ in _enum_active_monitors())
+
+
+def _save_layout_native() -> bool:
+    user32 = ctypes.windll.user32
+    layout = {}
+    for device_name, monitor_id in _enum_active_monitors():
+        dm = _DEVMODE()
+        dm.dmSize = ctypes.sizeof(_DEVMODE)
+        if not user32.EnumDisplaySettingsExW(device_name, ENUM_CURRENT_SETTINGS, ctypes.byref(dm), 0):
+            continue
+        layout[monitor_id] = {
+            "x": dm.dmPositionX,
+            "y": dm.dmPositionY,
+            "width": dm.dmPelsWidth,
+            "height": dm.dmPelsHeight,
+            "freq": dm.dmDisplayFrequency,
+            "bpp": dm.dmBitsPerPel,
+            "orientation": dm.dmDisplayOrientation,
+        }
+    if not layout:
+        return False
+    with open(_layout_path(), "w", encoding="utf-8") as f:
+        json.dump(layout, f, indent=2)
+    return True
+
+
+def _load_layout_native() -> bool:
+    path = _layout_path()
+    if not os.path.isfile(path):
+        return False
+    with open(path, "r", encoding="utf-8") as f:
+        layout = json.load(f)
+
+    user32 = ctypes.windll.user32
+    applied = False
+    for device_name, monitor_id in _enum_active_monitors():
+        saved = layout.get(monitor_id)
+        if not saved:
+            continue
+        dm = _DEVMODE()
+        dm.dmSize = ctypes.sizeof(_DEVMODE)
+        dm.dmFields = (
+            DM_POSITION | DM_PELSWIDTH | DM_PELSHEIGHT |
+            DM_DISPLAYFREQUENCY | DM_BITSPERPEL | DM_DISPLAYORIENTATION
+        )
+        dm.dmPositionX = saved["x"]
+        dm.dmPositionY = saved["y"]
+        dm.dmPelsWidth = saved["width"]
+        dm.dmPelsHeight = saved["height"]
+        dm.dmDisplayFrequency = saved["freq"]
+        dm.dmBitsPerPel = saved["bpp"]
+        dm.dmDisplayOrientation = saved["orientation"]
+        user32.ChangeDisplaySettingsExW(
+            device_name, ctypes.byref(dm), None, CDS_UPDATEREGISTRY | CDS_NORESET, None
+        )
+        applied = True
+    if applied:
+        user32.ChangeDisplaySettingsExW(None, None, None, 0, None)
+    return applied
 
 # ── Theme ────────────────────────────────────────────────────────────────────
 ctk.set_appearance_mode("dark")
@@ -288,7 +437,7 @@ class NSEApp(ctk.CTk):
 
     def _restore_step2(self):
         if self._run("/extend"):
-            self._load_layout()
+            _load_layout_native()
             self._status_var.set("Extended displays restored")
             self._status_label.configure(text_color=RESTORE_HOVER)
         else:
@@ -297,37 +446,12 @@ class NSEApp(ctk.CTk):
         self._set_buttons_enabled(True)
 
     def _save_layout(self):
-        mmt = _mmt_path()
-        if not os.path.isfile(mmt):
+        if _save_layout_native():
+            self._status_var.set(f"Layout saved ({_monitor_count()} monitors)")
+        else:
             messagebox.showerror(
                 "NSE — Error",
-                "MultiMonitorTool.exe not found in the tools folder.\n"
-                "See tools\\README.txt for where to get it.",
-            )
-            return
-        try:
-            subprocess.run(
-                [mmt, "/SaveConfig", _layout_path()],
-                shell=False,
-                check=True,
-                creationflags=subprocess.CREATE_NO_WINDOW,
-            )
-            self._status_var.set("Layout saved")
-        except subprocess.CalledProcessError as exc:
-            messagebox.showerror(
-                "NSE — Error",
-                f"MultiMonitorTool.exe failed to save the layout.\n\n{exc}",
-            )
-
-    def _load_layout(self):
-        mmt = _mmt_path()
-        layout = _layout_path()
-        if os.path.isfile(mmt) and os.path.isfile(layout):
-            subprocess.run(
-                [mmt, "/LoadConfig", layout],
-                shell=False,
-                check=False,
-                creationflags=subprocess.CREATE_NO_WINDOW,
+                "Could not read the current monitor layout.",
             )
 
 
